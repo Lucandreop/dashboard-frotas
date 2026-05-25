@@ -1,0 +1,29 @@
+# Planilhas com dados reais da empresa — não sobem para o GitHub
+data/*.xlsx
+data/*.xls
+data/*.csv
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambiente virtual (se criar um)
+.venv/
+venv/
+env/
+
+# Arquivos temporários do Windows
+Thumbs.db
+desktop.ini
+
+# Arquivos do editor
+.vscode/
+*.swp
+
+# Pasta interna do Claude Code
+.claude/
+
+# Arquivos gerados pelo Streamlit localmente
+.streamlit/secrets.toml
