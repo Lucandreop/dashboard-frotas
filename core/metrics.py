@@ -61,13 +61,11 @@ def calcular_kpis_gerais(df: pd.DataFrame) -> Dict:
     total_litros = df_comb['Qtde'].sum()
     total_valor_comb = df_comb['Valor.total'].sum()
 
-    # Km rodado: soma bruta da coluna Km Perc. — reflete exatamente a planilha
-    total_km = df_comb['Km Perc.'].sum()
-
-    # Média km/L: usa só linhas km_valido para evitar leituras anômalas
+    # Km rodado e média km/L: usa só linhas km_valido
     df_comb_val = df_comb[df_comb['km_valido'] == True]
     litros_validos = df_comb_val['Qtde'].sum()
     km_valido_sum = df_comb_val['Km Perc.'].sum()
+    total_km = km_valido_sum
     media_kml = km_valido_sum / litros_validos if litros_validos > 0 else 0.0
 
     return {
