@@ -126,12 +126,12 @@ def _slide_kpis(slide, kpis: dict, periodo: str, prs) -> None:
              Inches(0.4), Inches(0.2), Inches(12), Inches(0.7),
              tamanho=22, negrito=True, cor=BRANCO)
 
-    # Dados para os 4 cards
+    # Dados para os 4 cards (chaves atualizadas para v2)
     cards = [
-        ("VOLUME ABASTECIDO",   f"{fmt_num(kpis['total_litros'], 2)} L"),
-        ("INVESTIMENTO TOTAL",  fmt_brl(kpis['total_valor'])),
+        ("LITROS DIESEL",        f"{fmt_num(kpis['total_litros'], 2)} L"),
+        ("R$ COMBUSTÍVEL",       fmt_brl(kpis['total_valor_comb'])),
         ("DISTÂNCIA PERCORRIDA", f"{fmt_num(kpis['total_km'])} km"),
-        ("PREÇO MÉDIO / LITRO", fmt_brl(kpis['preco_medio'])),
+        ("R$ PEDÁGIO",           fmt_brl(kpis['total_valor_pedagio'])),
     ]
 
     for i, (label, valor) in enumerate(cards):
