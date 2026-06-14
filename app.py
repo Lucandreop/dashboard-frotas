@@ -74,6 +74,7 @@ def renderizar_sidebar(df: pd.DataFrame):
         meses_disponiveis = listar_meses_disponiveis(df)
         opcoes_mes = ['Ano inteiro'] + meses_disponiveis
 
+        mes_anterior = st.session_state.get('mes_anterior', opcoes_mes[0])
         mes_sel = st.selectbox(
             "Mês de análise",
             options=opcoes_mes,
@@ -81,16 +82,26 @@ def renderizar_sidebar(df: pd.DataFrame):
             help="'Ano inteiro' agrega todos os meses. Selecione um mês para filtrar as seções mensais."
         )
 
+        # Ao trocar o mês, reseta os filtros para evitar seleções inválidas
+        if mes_sel != mes_anterior:
+            st.session_state.mes_anterior = mes_sel
+            st.session_state.reset_counter += 1
+            st.rerun()
+
         st.markdown("### 🔍 Filtros")
 
         if 'reset_counter' not in st.session_state:
             st.session_state.reset_counter = 0
         k = st.session_state.reset_counter
 
-        cats_disp  = sorted(df['Categoria'].dropna().unique().tolist())
-        tipos_disp = sorted(df['Tipo/Modelo'].dropna().unique().tolist())
-        postos_disp = sorted(df['Posto'].dropna().unique().tolist())
-        placas_disp = sorted(df['Placa'].unique().tolist())
+        # Opções dos filtros vêm do mês selecionado, não do ano inteiro.
+        # Assim, se Janeiro está selecionado, só aparecem placas/postos de Janeiro.
+        df_base = df if mes_sel == 'Ano inteiro' else df[df['mes_nome'] == mes_sel]
+
+        cats_disp   = sorted(df_base['Categoria'].dropna().unique().tolist())
+        tipos_disp  = sorted(df_base['Tipo/Modelo'].dropna().unique().tolist())
+        postos_disp = sorted(df_base['Posto'].dropna().unique().tolist())
+        placas_disp = sorted(df_base['Placa'].unique().tolist())
 
         cats_sel = st.multiselect(
             "Categoria de Meta", options=cats_disp, default=[],
