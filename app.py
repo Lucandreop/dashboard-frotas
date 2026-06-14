@@ -572,18 +572,19 @@ def renderizar_tela_inicial() -> None:
             consolidado anual e análise separada de Combustível, ARLA e Pedágio.
         </p>
         <p style="color: #C81D25; font-size: 13px;">
-            ⬆️ Clique em <strong>Browse files</strong> acima para carregar o .xlsx
+            ⬆️ Clique em <strong>Browse files</strong> para carregar um ou vários .xlsx de uma vez
         </p>
     </div>
     """, unsafe_allow_html=True)
 
     with st.expander("ℹ️ Como usar o dashboard"):
         st.markdown("""
-        1. **Carregue** a planilha `.xlsx` — mensal ou anual (múltiplos meses empilhados)
-        2. Use o **seletor de mês** na sidebar para filtrar seções mensais
-        3. O **Consolidado Anual** sempre mostra jan-dez independente do filtro
-        4. **3 contas separadas**: Combustível | ARLA 32 | Pedágio — nunca misturadas
-        5. **Km/L calculado apenas sobre diesel** — ARLA e Pedágio não entram
+        1. **Carregue uma ou várias planilhas** `.xlsx` de uma vez (ex: Janeiro, Fevereiro, Março)
+        2. O dashboard **empilha os meses automaticamente** e detecta o período
+        3. Use o **seletor de mês** na sidebar para filtrar as seções mensais
+        4. O **Consolidado Anual** sempre mostra todos os meses carregados
+        5. **3 contas separadas**: Combustível | ARLA 32 | Pedágio — nunca misturadas
+        6. **Km/L calculado apenas sobre diesel** — ARLA e Pedágio não entram
 
         **Formatos aceitos:** planilha com colunas `Coluna1` (tipo) ou `Tipo/Modelo`,
         `Posto` ou `Histórico/estabelecimento`.
@@ -594,25 +595,43 @@ def renderizar_tela_inicial() -> None:
 
 def main() -> None:
     """Controla o fluxo completo: upload → filtros → visualizações → exportação."""
-    arquivo = st.file_uploader(
-        "📁 Carregar planilha de abastecimentos (.xlsx)",
+    arquivos = st.file_uploader(
+        "📁 Carregar planilha(s) de abastecimentos (.xlsx)",
         type=['xlsx'],
-        help="Planilha mensal ou anual — aba 'Planilha1' ou primeira aba"
+        accept_multiple_files=True,
+        help="Selecione um ou vários arquivos mensais — o dashboard empilha e consolida automaticamente."
     )
 
-    if arquivo is None:
+    if not arquivos:
         renderizar_tela_inicial()
         return
 
-    try:
-        df = carregar_planilha(arquivo)
-    except ValueError as e:
-        st.error(f"❌ {e}")
+    # Carrega cada arquivo e empilha num único DataFrame
+    dfs = []
+    erros = []
+    for arq in arquivos:
+        try:
+            dfs.append(carregar_planilha(arq))
+        except ValueError as e:
+            erros.append(f"**{arq.name}:** {e}")
+
+    if erros:
+        for msg in erros:
+            st.error(f"❌ {msg}")
+        if not dfs:
+            return
+
+    if not dfs:
+        renderizar_tela_inicial()
         return
+
+    # pd.concat empilha os meses; reset_index evita índices duplicados
+    df = pd.concat(dfs, ignore_index=True)
 
     periodo = detectar_periodo(df)
     n_comb = len(df[df['TipoProduto'] == 'COMBUSTIVEL'])
-    st.success(f"✅ {len(df)} lançamentos carregados ({n_comb} combustível) — {periodo}")
+    n_arquivos = len(dfs)
+    st.success(f"✅ {n_arquivos} arquivo(s) — {len(df)} lançamentos ({n_comb} combustível) — {periodo}")
 
     # Sidebar: retorna filtros + mês selecionado
     cats, tipos, postos, placas, mes_sel = renderizar_sidebar(df)
