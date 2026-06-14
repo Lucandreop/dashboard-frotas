@@ -642,7 +642,14 @@ def main() -> None:
     periodo = detectar_periodo(df)
     n_comb = len(df[df['TipoProduto'] == 'COMBUSTIVEL'])
     n_arquivos = len(dfs)
-    st.success(f"✅ {n_arquivos} arquivo(s) — {len(df)} lançamentos ({n_comb} combustível) — {periodo}")
+
+    # Detalha quantas linhas cada arquivo contribuiu para facilitar diagnóstico
+    detalhes = " | ".join(
+        f"{arq.name}: {len(d)} linhas"
+        for arq, d in zip(arquivos[:len(dfs)], dfs)
+    )
+    st.success(f"✅ {n_arquivos} arquivo(s) carregado(s) — {len(df)} lançamentos ({n_comb} combustível) — {periodo}")
+    st.caption(f"📂 {detalhes}")
 
     # Sidebar: retorna filtros + mês selecionado
     cats, tipos, postos, placas, mes_sel = renderizar_sidebar(df)

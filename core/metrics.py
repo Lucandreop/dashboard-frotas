@@ -61,13 +61,14 @@ def calcular_kpis_gerais(df: pd.DataFrame) -> Dict:
     total_litros = df_comb['Qtde'].sum()
     total_valor_comb = df_comb['Valor.total'].sum()
 
-    # Distância e eficiência: só registros com km_valido
-    df_comb_val = df_comb[df_comb['km_valido'] == True]
-    total_km = df_comb_val['Km Perc.'].sum()
-    litros_validos = df_comb_val['Qtde'].sum()
+    # Km rodado: soma bruta da coluna Km Perc. — reflete exatamente a planilha
+    total_km = df_comb['Km Perc.'].sum()
 
-    # Média ponderada: soma km / soma litros das linhas válidas
-    media_kml = total_km / litros_validos if litros_validos > 0 else 0.0
+    # Média km/L: usa só linhas km_valido para evitar leituras anômalas
+    df_comb_val = df_comb[df_comb['km_valido'] == True]
+    litros_validos = df_comb_val['Qtde'].sum()
+    km_valido_sum = df_comb_val['Km Perc.'].sum()
+    media_kml = km_valido_sum / litros_validos if litros_validos > 0 else 0.0
 
     return {
         # Combustível
@@ -104,13 +105,14 @@ def consolidado_mensal(df: pd.DataFrame) -> pd.DataFrame:
     agg_comb = df_comb.groupby('mes_nome').agg(
         Litros=('Qtde', 'sum'),
         R_Comb=('Valor.total', 'sum'),
+        Km=('Km Perc.', 'sum'),       # km bruto — reflete a planilha
     ).reset_index()
 
-    # Km percorrido: só linhas com km_valido
+    # Litros e km válidos (só para calcular a média km/L)
     df_comb_val = df_comb[df_comb['km_valido'] == True]
     agg_km = df_comb_val.groupby('mes_nome').agg(
-        Km=('Km Perc.', 'sum'),
         LitrosValidos=('Qtde', 'sum'),
+        KmValido=('Km Perc.', 'sum'),
     ).reset_index()
 
     # ARLA por mês
@@ -131,12 +133,12 @@ def consolidado_mensal(df: pd.DataFrame) -> pd.DataFrame:
     resultado = resultado.merge(agg_ped,  on='mes_nome', how='left')
 
     # Preenche NaN com zero (meses sem dados ficam zerados)
-    for col in ['Litros', 'R_Comb', 'Km', 'LitrosValidos', 'R_Arla', 'R_Pedagio']:
+    for col in ['Litros', 'R_Comb', 'Km', 'LitrosValidos', 'KmValido', 'R_Arla', 'R_Pedagio']:
         resultado[col] = resultado[col].fillna(0.0)
 
-    # Média ponderada por mês
+    # Média ponderada por mês usa km e litros das linhas válidas
     resultado['MediaKmL'] = (
-        resultado['Km'] / resultado['LitrosValidos'].replace(0.0, float('nan'))
+        resultado['KmValido'] / resultado['LitrosValidos'].replace(0.0, float('nan'))
     ).fillna(0.0)
 
     return resultado
@@ -257,32 +259,36 @@ def agregar_por_placa(df: pd.DataFrame) -> pd.DataFrame:
         s = serie.dropna()
         return s.mode().iloc[0] if not s.empty else ''
 
-    # Totais de combustível por placa (todas as linhas)
+    # Totais de combustível por placa (todas as linhas) — inclui km bruto
     agg_geral = df_comb.groupby('Placa').agg(
         Tipo=('Tipo/Modelo', moda_segura),
         Categoria=('Categoria', 'first'),
         MetaNum=('MetaNum', 'first'),
         TotalLitros=('Qtde', 'sum'),
         TotalValor=('Valor.total', 'sum'),
+        TotalKm=('Km Perc.', 'sum'),       # km bruto para exibição
         QtdAbastecimentos=('Nº', 'count'),
     ).reset_index()
 
-    # Km e litros válidos (para eficiência)
+    # Km e litros válidos (só para calcular a média km/L)
     if not df_comb_val.empty:
         agg_km = df_comb_val.groupby('Placa').agg(
-            TotalKm=('Km Perc.', 'sum'),
+            KmValido=('Km Perc.', 'sum'),
             LitrosValidos=('Qtde', 'sum'),
         ).reset_index()
     else:
-        agg_km = pd.DataFrame(columns=['Placa', 'TotalKm', 'LitrosValidos'])
+        agg_km = pd.DataFrame(columns=['Placa', 'KmValido', 'LitrosValidos'])
 
     resultado = agg_geral.merge(agg_km, on='Placa', how='left')
 
     resultado['TotalKm']       = pd.to_numeric(resultado['TotalKm'],       errors='coerce').fillna(0.0)
     resultado['LitrosValidos'] = pd.to_numeric(resultado['LitrosValidos'], errors='coerce').fillna(0.0)
+    if 'KmValido' not in resultado.columns:
+        resultado['KmValido'] = 0.0
+    resultado['KmValido']      = pd.to_numeric(resultado['KmValido'],      errors='coerce').fillna(0.0)
 
     resultado['MediaKmL'] = (
-        resultado['TotalKm'] / resultado['LitrosValidos'].replace(0.0, float('nan'))
+        resultado['KmValido'] / resultado['LitrosValidos'].replace(0.0, float('nan'))
     ).fillna(0.0)
 
     resultado['AtiugiuMeta'] = resultado.apply(

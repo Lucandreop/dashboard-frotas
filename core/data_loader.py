@@ -55,6 +55,13 @@ def carregar_planilha(arquivo) -> pd.DataFrame:
         if 'Coluna1' in df.columns and 'Tipo/Modelo' not in df.columns:
             df = df.rename(columns={'Coluna1': 'Tipo/Modelo'})
 
+        # Normaliza nome da coluna MetaMédia — variações de encoding
+        for variante in ['MetaMédia', 'MetaMedia', 'Meta Média', 'Meta Media',
+                         'Metamédia', 'Metamedia']:
+            if variante in df.columns and 'MetaMédia' not in df.columns:
+                df = df.rename(columns={variante: 'MetaMédia'})
+                break
+
         # Verifica colunas mínimas obrigatórias
         faltando = [c for c in COLUNAS_MINIMAS if c not in df.columns]
         if faltando:
