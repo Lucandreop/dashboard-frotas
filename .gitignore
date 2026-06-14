@@ -1,7 +1,9 @@
 # Planilhas com dados reais da empresa — não sobem para o GitHub
 data/*.xlsx
 data/*.xls
+# Exceção: cadastro_veiculos.csv não tem dados sensíveis e é necessário para o deploy
 data/*.csv
+!data/cadastro_veiculos.csv
 
 # Cache do Python
 __pycache__/

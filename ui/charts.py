@@ -7,13 +7,13 @@ O Streamlit renderiza esse objeto com st.plotly_chart().
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
-from core.metrics import fmt_brl, fmt_num
+from core.metrics import fmt_brl, fmt_num, ORDEM_MESES
 from ui.theme import (
     COR_AZUL_PRIMARIO, COR_VERMELHO, COR_AZUL_CLARO,
     COR_VERMELHO_CLARO, COR_VERDE_OK, COR_TEXTO_PRINCIPAL
 )
 
-# Configuração de layout aplicada a todos os gráficos (evita repetição)
+# Configuração de layout aplicada a todos os gráficos
 _LAYOUT_BASE = dict(
     font=dict(family="Calibri, Segoe UI, sans-serif", size=12, color=COR_TEXTO_PRINCIPAL),
     paper_bgcolor="white",
@@ -31,10 +31,7 @@ def _altura_dinamica(n_itens: int, min_px: int = 280) -> int:
 # ─── GRÁFICOS DA ANÁLISE POR CATEGORIA ────────────────────────────────────────
 
 def grafico_km_por_placa(df_placas: pd.DataFrame) -> go.Figure:
-    """
-    Barras horizontais: distância total (km) por placa.
-    Ordenado do maior para o menor.
-    """
+    """Barras horizontais: distância total (km) por placa."""
     df = df_placas[df_placas['TotalKm'] > 0].sort_values('TotalKm', ascending=True)
 
     if df.empty:
@@ -45,7 +42,6 @@ def grafico_km_por_placa(df_placas: pd.DataFrame) -> go.Figure:
         y=df['Placa'],
         orientation='h',
         marker_color=COR_AZUL_PRIMARIO,
-        # Rótulo na ponta da barra com o valor formatado
         text=[fmt_num(v) + ' km' for v in df['TotalKm']],
         textposition='outside',
         cliponaxis=False,
@@ -64,9 +60,7 @@ def grafico_km_por_placa(df_placas: pd.DataFrame) -> go.Figure:
 
 
 def grafico_valor_por_placa(df_placas: pd.DataFrame) -> go.Figure:
-    """
-    Barras horizontais: investimento total (R$) por placa.
-    """
+    """Barras horizontais: investimento total (R$) por placa."""
     df = df_placas[df_placas['TotalValor'] > 0].sort_values('TotalValor', ascending=True)
 
     if df.empty:
@@ -97,16 +91,13 @@ def grafico_valor_por_placa(df_placas: pd.DataFrame) -> go.Figure:
 def grafico_eficiencia_por_placa(df_placas: pd.DataFrame, meta: float) -> go.Figure:
     """
     Barras horizontais: eficiência (km/L) por placa.
-
-    Barras verdes = acima da meta  |  Barras vermelhas = abaixo da meta
-    Linha tracejada vermelha = a meta de referência da categoria
+    Verde = acima da meta | Vermelho = abaixo da meta.
     """
     df = df_placas[df_placas['MediaKmL'] > 0].sort_values('MediaKmL', ascending=True)
 
     if df.empty:
         return _grafico_vazio("Sem dados de eficiência para esta seleção")
 
-    # Cor individual por barra: verde se ≥ meta, vermelho se < meta
     cores = [COR_VERDE_OK if v >= meta else COR_VERMELHO for v in df['MediaKmL']]
 
     fig = go.Figure(go.Bar(
@@ -120,7 +111,6 @@ def grafico_eficiencia_por_placa(df_placas: pd.DataFrame, meta: float) -> go.Fig
         hovertemplate='<b>%{y}</b><br>%{x:.2f} km/L<extra></extra>',
     ))
 
-    # Linha vertical tracejada indicando a meta da categoria
     fig.add_vline(
         x=meta,
         line_dash="dash",
@@ -142,20 +132,17 @@ def grafico_eficiencia_por_placa(df_placas: pd.DataFrame, meta: float) -> go.Fig
     return fig
 
 
-# ─── GRÁFICO DE CUSTO POR POSTO ───────────────────────────────────────────────
+# ─── CUSTO POR POSTO ──────────────────────────────────────────────────────────
 
 def grafico_custo_por_posto(agg_posto: pd.DataFrame) -> go.Figure:
     """
-    Barras verticais comparando preço médio ponderado (R$/L) por posto.
-    Recebe o DataFrame já agregado retornado por metrics.calcular_custo_por_posto().
-    Verde = mais barato  |  Vermelho = mais caro  |  Azul = intermediário
+    Barras verticais: preço médio ponderado (R$/L) por posto.
+    Verde = mais barato | Vermelho = mais caro | Azul = intermediário.
     """
-    agg = agg_posto  # renomeia para clareza interna
-
+    agg = agg_posto
     if agg.empty:
         return _grafico_vazio("Sem dados de posto")
 
-    # Identifica o mais barato e o mais caro
     idx_min = agg['PrecoMedio'].idxmin()
     idx_max = agg['PrecoMedio'].idxmax()
 
@@ -197,11 +184,7 @@ def grafico_custo_por_posto(agg_posto: pd.DataFrame) -> go.Figure:
 # ─── DRILL-DOWN: EVOLUÇÃO DE UMA PLACA ────────────────────────────────────────
 
 def grafico_evolucao_placa(df_placa: pd.DataFrame, placa: str) -> go.Figure:
-    """
-    Linha temporal mostrando a eficiência (km/L) ao longo do mês para uma placa.
-    Inclui linha horizontal tracejada com a meta da placa.
-    """
-    # Apenas registros com km válido, ordenados por data
+    """Linha temporal de eficiência (km/L) para uma placa no período."""
     df_valido = df_placa[df_placa['km_valido'] == True].sort_values('Data Abast')
 
     if df_valido.empty:
@@ -217,7 +200,6 @@ def grafico_evolucao_placa(df_placa: pd.DataFrame, placa: str) -> go.Figure:
         name='km/L',
     ))
 
-    # Linha da meta (se existir)
     metas_validas = df_placa['MetaNum'].dropna()
     if not metas_validas.empty:
         meta = float(metas_validas.iloc[0])
@@ -240,6 +222,194 @@ def grafico_evolucao_placa(df_placa: pd.DataFrame, placa: str) -> go.Figure:
         xaxis=dict(title='', showgrid=True, gridcolor='#EEEEEE'),
         yaxis=dict(title='km/L', showgrid=True, gridcolor='#EEEEEE'),
         height=330,
+    )
+    return fig
+
+
+# ─── CONSOLIDADO MENSAL ────────────────────────────────────────────────────────
+
+def grafico_consolidado_litros(df_cons: pd.DataFrame) -> go.Figure:
+    """Barras: litros de diesel por mês (jan a dez)."""
+    # Filtra apenas meses com dados para não poluir o gráfico com zeros
+    df = df_cons[df_cons['Litros'] > 0]
+
+    fig = go.Figure(go.Bar(
+        x=df['mes_nome'],
+        y=df['Litros'],
+        marker_color=COR_AZUL_PRIMARIO,
+        text=[fmt_num(v, 0) + ' L' for v in df['Litros']],
+        textposition='outside',
+        hovertemplate='<b>%{x}</b><br>%{y:,.0f} L<extra></extra>',
+    ))
+
+    fig.update_layout(
+        **_LAYOUT_BASE,
+        title=dict(text="⛽ Litros de Diesel por Mês",
+                   font=dict(size=13, color=COR_AZUL_PRIMARIO)),
+        xaxis=dict(categoryorder='array', categoryarray=ORDEM_MESES),
+        yaxis=dict(showgrid=True, gridcolor='#EEEEEE', showticklabels=False),
+        height=320,
+    )
+    return fig
+
+
+def grafico_consolidado_km(df_cons: pd.DataFrame) -> go.Figure:
+    """Barras: km rodado por mês (jan a dez)."""
+    df = df_cons[df_cons['Km'] > 0]
+
+    fig = go.Figure(go.Bar(
+        x=df['mes_nome'],
+        y=df['Km'],
+        marker_color=COR_AZUL_CLARO,
+        text=[fmt_num(v, 0) + ' km' for v in df['Km']],
+        textposition='outside',
+        hovertemplate='<b>%{x}</b><br>%{y:,.0f} km<extra></extra>',
+    ))
+
+    fig.update_layout(
+        **_LAYOUT_BASE,
+        title=dict(text="📍 Km Rodado por Mês",
+                   font=dict(size=13, color=COR_AZUL_PRIMARIO)),
+        xaxis=dict(categoryorder='array', categoryarray=ORDEM_MESES),
+        yaxis=dict(showgrid=True, gridcolor='#EEEEEE', showticklabels=False),
+        height=320,
+    )
+    return fig
+
+
+def grafico_consolidado_custos(df_cons: pd.DataFrame) -> go.Figure:
+    """
+    Barras agrupadas: R$ Combustível, R$ ARLA e R$ Pedágio por mês.
+    Só exibe meses que têm pelo menos um valor > 0.
+    """
+    # Filtra meses com qualquer dado
+    df = df_cons[(df_cons['R_Comb'] > 0) | (df_cons['R_Arla'] > 0) | (df_cons['R_Pedagio'] > 0)]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name='Combustível',
+        x=df['mes_nome'],
+        y=df['R_Comb'],
+        marker_color=COR_AZUL_PRIMARIO,
+        hovertemplate='<b>%{x}</b><br>Combustível: R$ %{y:,.2f}<extra></extra>',
+    ))
+
+    fig.add_trace(go.Bar(
+        name='ARLA 32',
+        x=df['mes_nome'],
+        y=df['R_Arla'],
+        marker_color='#2ECC71',
+        hovertemplate='<b>%{x}</b><br>ARLA: R$ %{y:,.2f}<extra></extra>',
+    ))
+
+    fig.add_trace(go.Bar(
+        name='Pedágio',
+        x=df['mes_nome'],
+        y=df['R_Pedagio'],
+        marker_color=COR_VERMELHO,
+        hovertemplate='<b>%{x}</b><br>Pedágio: R$ %{y:,.2f}<extra></extra>',
+    ))
+
+    fig.update_layout(
+        **_LAYOUT_BASE,
+        title=dict(text="💰 Custo por Mês — 3 Contas Separadas",
+                   font=dict(size=13, color=COR_AZUL_PRIMARIO)),
+        barmode='group',
+        xaxis=dict(categoryorder='array', categoryarray=ORDEM_MESES),
+        yaxis=dict(showgrid=True, gridcolor='#EEEEEE', showticklabels=False),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        height=350,
+        margin=dict(l=10, r=10, t=60, b=10),
+    )
+    return fig
+
+
+def grafico_consolidado_media(df_cons: pd.DataFrame) -> go.Figure:
+    """Linha com marcadores: média km/L por mês (jan a dez)."""
+    df = df_cons[df_cons['MediaKmL'] > 0]
+
+    fig = go.Figure(go.Scatter(
+        x=df['mes_nome'],
+        y=df['MediaKmL'],
+        mode='lines+markers',
+        line=dict(color=COR_AZUL_PRIMARIO, width=2.5),
+        marker=dict(size=10, color=COR_VERMELHO, line=dict(color='white', width=1.5)),
+        text=[fmt_num(v, 2) + ' km/L' for v in df['MediaKmL']],
+        textposition='top center',
+        hovertemplate='<b>%{x}</b><br>%{y:.2f} km/L<extra></extra>',
+    ))
+
+    fig.update_layout(
+        **_LAYOUT_BASE,
+        title=dict(text="🏎️ Média km/L por Mês (só diesel)",
+                   font=dict(size=13, color=COR_AZUL_PRIMARIO)),
+        xaxis=dict(categoryorder='array', categoryarray=ORDEM_MESES,
+                   showgrid=True, gridcolor='#EEEEEE'),
+        yaxis=dict(title='km/L', showgrid=True, gridcolor='#EEEEEE'),
+        height=320,
+    )
+    return fig
+
+
+# ─── ARLA E PEDÁGIO POR PLACA ─────────────────────────────────────────────────
+
+def grafico_arla_por_placa(df_arla: pd.DataFrame) -> go.Figure:
+    """Barras horizontais: R$ de ARLA 32 por placa."""
+    if df_arla.empty:
+        return _grafico_vazio("Sem lançamentos de ARLA 32 nesta seleção")
+
+    df = df_arla.sort_values('ValorArla', ascending=True)
+
+    fig = go.Figure(go.Bar(
+        x=df['ValorArla'],
+        y=df['Placa'],
+        orientation='h',
+        marker_color='#2ECC71',
+        text=[fmt_brl(v) for v in df['ValorArla']],
+        textposition='outside',
+        cliponaxis=False,
+        hovertemplate='<b>%{y}</b><br>R$ %{x:,.2f}<extra></extra>',
+    ))
+
+    fig.update_layout(
+        **_LAYOUT_BASE,
+        title=dict(text="🧪 R$ ARLA 32 por Placa",
+                   font=dict(size=13, color=COR_AZUL_PRIMARIO)),
+        xaxis=dict(showgrid=True, gridcolor='#EEEEEE', showticklabels=False),
+        yaxis=dict(tickfont=dict(size=11)),
+        showlegend=False,
+        height=_altura_dinamica(len(df)),
+    )
+    return fig
+
+
+def grafico_pedagio_por_placa(df_ped: pd.DataFrame) -> go.Figure:
+    """Barras horizontais: R$ de pedágio por placa."""
+    if df_ped.empty:
+        return _grafico_vazio("Sem lançamentos de pedágio nesta seleção")
+
+    df = df_ped.sort_values('ValorPedagio', ascending=True)
+
+    fig = go.Figure(go.Bar(
+        x=df['ValorPedagio'],
+        y=df['Placa'],
+        orientation='h',
+        marker_color=COR_VERMELHO,
+        text=[fmt_brl(v) for v in df['ValorPedagio']],
+        textposition='outside',
+        cliponaxis=False,
+        hovertemplate='<b>%{y}</b><br>R$ %{x:,.2f}<extra></extra>',
+    ))
+
+    fig.update_layout(
+        **_LAYOUT_BASE,
+        title=dict(text="🛣️ R$ Pedágio por Placa",
+                   font=dict(size=13, color=COR_AZUL_PRIMARIO)),
+        xaxis=dict(showgrid=True, gridcolor='#EEEEEE', showticklabels=False),
+        yaxis=dict(tickfont=dict(size=11)),
+        showlegend=False,
+        height=_altura_dinamica(len(df)),
     )
     return fig
 

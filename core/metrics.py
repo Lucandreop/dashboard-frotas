@@ -1,14 +1,15 @@
 """
 Funções de cálculo de KPIs, agregações e rankings.
 Toda a lógica de negócio fica aqui — separada da interface visual.
+
+v2: separa combustível, ARLA e pedágio em contas independentes.
 """
 
 import pandas as pd
 import numpy as np
 from typing import Dict, List
 
-# Fonte única de verdade para as metas de eficiência por categoria.
-# Importar daqui em qualquer módulo que precise das metas — nunca hardcode.
+# Metas de eficiência por categoria — fonte única de verdade
 METAS_CATEGORIA: Dict[str, float] = {
     'Leve':        8.0,
     'Média':       5.5,
@@ -16,126 +17,274 @@ METAS_CATEGORIA: Dict[str, float] = {
     'Pesada':      3.4,
 }
 
+# Ordem dos meses para exibição no consolidado anual
+ORDEM_MESES = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+]
 
-# ─── FORMATADORES DE NÚMERO NO PADRÃO BRASILEIRO ─────────────────────────────
-# O Brasil usa ponto como separador de milhar e vírgula como decimal.
-# Exemplo inglês: 1,234.56  →  Exemplo BR: 1.234,56
+
+# ─── FORMATADORES PADRÃO BRASILEIRO ──────────────────────────────────────────
 
 def fmt_brl(v: float) -> str:
-    """
-    Formata valor como moeda brasileira.
-    Exemplo: 310390.87 → 'R$ 310.390,87'
-    """
+    """Formata como moeda BR. Ex: 310390.87 → 'R$ 310.390,87'"""
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "R$ 0,00"
-    # f"{v:,.2f}" → "310,390.87" (padrão americano com vírgula)
-    # Trocamos: vírgula → X (marcador temporário), ponto → vírgula, X → ponto
     s = f"{v:,.2f}"
     return "R$ " + s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def fmt_num(v: float, decimais: int = 0) -> str:
-    """
-    Formata número no padrão brasileiro.
-    Exemplo: 43861.38 com decimais=2 → '43.861,38'
-    Exemplo: 151632 com decimais=0  → '151.632'
-    """
+    """Formata número BR. Ex: 43861.38 com decimais=2 → '43.861,38'"""
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "0"
     s = f"{v:,.{decimais}f}"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-# ─── KPIs GERAIS ──────────────────────────────────────────────────────────────
+# ─── KPIs GERAIS (3 CONTAS SEPARADAS) ────────────────────────────────────────
 
 def calcular_kpis_gerais(df: pd.DataFrame) -> Dict:
     """
-    Calcula os 4 indicadores principais do dashboard.
+    Calcula os 6 indicadores principais, separados pelas 3 contas.
 
-    REGRA IMPORTANTE:
-    - Volume (L) e Valor (R$): contam TODOS os registros
-    - Distância (km) e Eficiência (km/L): contam APENAS km_valido=True
-
-    Isso evita que registros com hodômetro quebrado distorçam a eficiência.
+    COMBUSTÍVEL: litros, R$, km percorrido, média km/L
+    ARLA: R$ (litros são informativos mas não entram nos KPIs de eficiência)
+    PEDÁGIO: R$ (a Qtde=1 por passagem não representa litros — ignorada nos KPIs)
     """
-    # Totais gerais — todas as linhas, inclusive sem hodômetro
-    total_litros = df['Qtde'].sum()
-    total_valor = df['Valor.total'].sum()
+    # Filtra cada conta separadamente
+    df_comb = df[df['TipoProduto'] == 'COMBUSTIVEL']
+    df_arla = df[df['TipoProduto'] == 'ARLA']
+    df_ped  = df[df['TipoProduto'] == 'PEDAGIO']
 
-    # Distância — apenas registros com km válido
-    df_valido = df[df['km_valido'] == True]
-    total_km = df_valido['Km Perc.'].sum()
+    # Combustível: totais gerais (todas as linhas de comb)
+    total_litros = df_comb['Qtde'].sum()
+    total_valor_comb = df_comb['Valor.total'].sum()
 
-    # Preço médio ponderado: total gasto ÷ total de litros
-    # (não é a média simples da coluna Vlr.litro, que ignoraria volume comprado)
-    preco_medio = total_valor / total_litros if total_litros > 0 else 0.0
+    # Distância e eficiência: só registros com km_valido
+    df_comb_val = df_comb[df_comb['km_valido'] == True]
+    total_km = df_comb_val['Km Perc.'].sum()
+    litros_validos = df_comb_val['Qtde'].sum()
+
+    # Média ponderada: soma km / soma litros das linhas válidas
+    media_kml = total_km / litros_validos if litros_validos > 0 else 0.0
 
     return {
-        'total_litros': total_litros,
-        'total_valor': total_valor,
-        'total_km': total_km,
-        'preco_medio': preco_medio,
-        'n_abastecimentos': len(df),
-        'n_placas': df['Placa'].nunique(),
+        # Combustível
+        'total_litros':    total_litros,
+        'total_valor_comb': total_valor_comb,
+        'total_km':        total_km,
+        'media_kml':       media_kml,
+        # ARLA
+        'total_valor_arla':   df_arla['Valor.total'].sum(),
+        'total_litros_arla':  df_arla['Qtde'].sum(),
+        # Pedágio
+        'total_valor_pedagio':    df_ped['Valor.total'].sum(),
+        'total_passagens_pedagio': int(df_ped['Qtde'].sum()),
+        # Contagens gerais
+        'n_abastecimentos': len(df_comb),
+        'n_placas':         df['Placa'].nunique(),
     }
 
 
-# ─── AGREGAÇÃO POR PLACA ──────────────────────────────────────────────────────
+# ─── CONSOLIDADO MENSAL (JAN A DEZ) ──────────────────────────────────────────
+
+def consolidado_mensal(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega os dados por mês, separando as 3 contas.
+
+    Retorna um DataFrame com uma linha por mês (apenas meses presentes nos dados).
+    Colunas: mes_nome, Litros, Km, R_Comb, R_Arla, R_Pedagio, MediaKmL
+    """
+    df_comb = df[df['TipoProduto'] == 'COMBUSTIVEL'].copy()
+    df_arla = df[df['TipoProduto'] == 'ARLA'].copy()
+    df_ped  = df[df['TipoProduto'] == 'PEDAGIO'].copy()
+
+    # Agrega combustível por mês
+    agg_comb = df_comb.groupby('mes_nome').agg(
+        Litros=('Qtde', 'sum'),
+        R_Comb=('Valor.total', 'sum'),
+    ).reset_index()
+
+    # Km percorrido: só linhas com km_valido
+    df_comb_val = df_comb[df_comb['km_valido'] == True]
+    agg_km = df_comb_val.groupby('mes_nome').agg(
+        Km=('Km Perc.', 'sum'),
+        LitrosValidos=('Qtde', 'sum'),
+    ).reset_index()
+
+    # ARLA por mês
+    agg_arla = df_arla.groupby('mes_nome').agg(
+        R_Arla=('Valor.total', 'sum'),
+    ).reset_index()
+
+    # Pedágio por mês
+    agg_ped = df_ped.groupby('mes_nome').agg(
+        R_Pedagio=('Valor.total', 'sum'),
+    ).reset_index()
+
+    # Junta tudo num único DataFrame com todos os 12 meses como base
+    base = pd.DataFrame({'mes_nome': ORDEM_MESES})
+    resultado = base.merge(agg_comb, on='mes_nome', how='left')
+    resultado = resultado.merge(agg_km,   on='mes_nome', how='left')
+    resultado = resultado.merge(agg_arla, on='mes_nome', how='left')
+    resultado = resultado.merge(agg_ped,  on='mes_nome', how='left')
+
+    # Preenche NaN com zero (meses sem dados ficam zerados)
+    for col in ['Litros', 'R_Comb', 'Km', 'LitrosValidos', 'R_Arla', 'R_Pedagio']:
+        resultado[col] = resultado[col].fillna(0.0)
+
+    # Média ponderada por mês
+    resultado['MediaKmL'] = (
+        resultado['Km'] / resultado['LitrosValidos'].replace(0.0, float('nan'))
+    ).fillna(0.0)
+
+    return resultado
+
+
+# ─── ARLA POR PLACA ──────────────────────────────────────────────────────────
+
+def arla_por_placa(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega o consumo de ARLA 32 por placa.
+    Retorna: Placa, LitrosArla, ValorArla — ordenado por valor decrescente.
+    """
+    df_arla = df[df['TipoProduto'] == 'ARLA']
+
+    if df_arla.empty:
+        return pd.DataFrame(columns=['Placa', 'LitrosArla', 'ValorArla'])
+
+    agg = df_arla.groupby('Placa').agg(
+        LitrosArla=('Qtde', 'sum'),
+        ValorArla=('Valor.total', 'sum'),
+    ).reset_index()
+
+    return agg.sort_values('ValorArla', ascending=False).reset_index(drop=True)
+
+
+# ─── PEDÁGIO POR PLACA ────────────────────────────────────────────────────────
+
+def pedagio_por_placa(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega o custo de pedágio por placa.
+    Retorna: Placa, Passagens, ValorPedagio — ordenado por valor decrescente.
+
+    Cada linha de PEDAGIO tem Qtde=1 (uma passagem).
+    """
+    df_ped = df[df['TipoProduto'] == 'PEDAGIO']
+
+    if df_ped.empty:
+        return pd.DataFrame(columns=['Placa', 'Passagens', 'ValorPedagio'])
+
+    agg = df_ped.groupby('Placa').agg(
+        Passagens=('Qtde', 'sum'),
+        ValorPedagio=('Valor.total', 'sum'),
+    ).reset_index()
+
+    return agg.sort_values('ValorPedagio', ascending=False).reset_index(drop=True)
+
+
+# ─── MELHOR MÉDIA POR TIPO DE VEÍCULO ────────────────────────────────────────
+
+def melhor_media_por_tipo(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Para cada tipo de veículo, retorna a placa com a melhor média km/L no período.
+
+    Retorna: Tipo, Placa, MediaKmL, Meta, Status
+    Só considera TipoProduto==COMBUSTIVEL e km_valido==True.
+    """
+    df_comb = df[(df['TipoProduto'] == 'COMBUSTIVEL') & (df['km_valido'] == True)]
+
+    if df_comb.empty:
+        return pd.DataFrame(columns=['Tipo', 'Placa', 'MediaKmL', 'Meta', 'Status'])
+
+    # Média ponderada por placa
+    def moda_str(s):
+        m = s.dropna()
+        m = m[m != '']
+        return m.mode().iloc[0] if len(m.mode()) > 0 else ''
+
+    def moda_num(s):
+        m = s.dropna()
+        return m.mode().iloc[0] if len(m.mode()) > 0 else float('nan')
+
+    agg = df_comb.groupby('Placa').agg(
+        TotalKm=('Km Perc.', 'sum'),
+        LitrosValidos=('Qtde', 'sum'),
+        Tipo=('Tipo/Modelo', moda_str),
+        Meta=('MetaNum', moda_num),
+    ).reset_index()
+
+    agg['MediaKmL'] = (
+        agg['TotalKm'] / agg['LitrosValidos'].replace(0.0, float('nan'))
+    ).fillna(0.0)
+
+    # Filtra só placas com tipo definido e com km real
+    agg = agg[(agg['Tipo'] != '') & (agg['Tipo'] != 'nan') & (agg['MediaKmL'] > 0)]
+
+    if agg.empty:
+        return pd.DataFrame(columns=['Tipo', 'Placa', 'MediaKmL', 'Meta', 'Status'])
+
+    # Para cada tipo, pega a placa com maior média
+    idx_melhores = agg.groupby('Tipo')['MediaKmL'].idxmax()
+    melhores = agg.loc[idx_melhores].copy()
+
+    # Status vs meta
+    def calcular_status(row) -> str:
+        if pd.isna(row['Meta']) or row['Meta'] == 0:
+            return '—'
+        return '✅ Acima' if row['MediaKmL'] >= row['Meta'] else '❌ Abaixo'
+
+    melhores['Status'] = melhores.apply(calcular_status, axis=1)
+
+    return melhores[['Tipo', 'Placa', 'MediaKmL', 'Meta', 'Status']].sort_values('Tipo').reset_index(drop=True)
+
+
+# ─── AGREGAÇÃO POR PLACA (COMBUSTÍVEL) ───────────────────────────────────────
 
 def agregar_por_placa(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Agrega os dados por placa, calculando totais e a média km/L correta.
+    Agrega dados de COMBUSTÍVEL por placa.
 
-    A média km/L usa MÉDIA PONDERADA (não média simples das linhas):
-        media = Σ(km percorrido válido) / Σ(litros das linhas válidas)
-
-    Por que ponderada? Se uma placa abasteceu 50L em um trecho e 200L em outro,
-    a média simples trata os dois iguais — a ponderada considera o volume real.
+    ARLA e PEDÁGIO são excluídos aqui — têm suas próprias funções.
+    A média km/L usa MÉDIA PONDERADA: Σ(km válido) / Σ(litros válidos).
     """
-    # Separa registros com km válido para o cálculo de eficiência
-    df_valido = df[df['km_valido'] == True]
+    # Só combustível entra na agregação de placa (eficiência)
+    df_comb = df[df['TipoProduto'] == 'COMBUSTIVEL']
+    df_comb_val = df_comb[df_comb['km_valido'] == True]
 
-    # Função auxiliar para pegar o valor mais frequente sem explodir em erros
     def moda_segura(serie):
         s = serie.dropna()
         return s.mode().iloc[0] if not s.empty else ''
 
-    # Agrega totais gerais (todas as linhas da placa)
-    agg_geral = df.groupby('Placa').agg(
+    # Totais de combustível por placa (todas as linhas)
+    agg_geral = df_comb.groupby('Placa').agg(
         Tipo=('Tipo/Modelo', moda_segura),
         Categoria=('Categoria', 'first'),
         MetaNum=('MetaNum', 'first'),
         TotalLitros=('Qtde', 'sum'),
         TotalValor=('Valor.total', 'sum'),
         QtdAbastecimentos=('Nº', 'count'),
-        Condutor=('Condutor', moda_segura),
     ).reset_index()
 
-    # Agrega km e litros VÁLIDOS separadamente
-    if not df_valido.empty:
-        agg_km = df_valido.groupby('Placa').agg(
+    # Km e litros válidos (para eficiência)
+    if not df_comb_val.empty:
+        agg_km = df_comb_val.groupby('Placa').agg(
             TotalKm=('Km Perc.', 'sum'),
             LitrosValidos=('Qtde', 'sum'),
         ).reset_index()
     else:
-        # Caso extremo: nenhum registro com km válido
         agg_km = pd.DataFrame(columns=['Placa', 'TotalKm', 'LitrosValidos'])
 
-    # Junta os dois DataFrames pela placa (left join: mantém todas as placas)
     resultado = agg_geral.merge(agg_km, on='Placa', how='left')
 
-    # Garante dtype float após o merge (merge com df vazio produz dtype object)
     resultado['TotalKm']       = pd.to_numeric(resultado['TotalKm'],       errors='coerce').fillna(0.0)
     resultado['LitrosValidos'] = pd.to_numeric(resultado['LitrosValidos'], errors='coerce').fillna(0.0)
 
-    # Divisão segura: substitui 0 por NaN antes de dividir, depois preenche com 0.
-    # np.where avalia AMBOS os lados antes de escolher — por isso não usamos ele aqui.
-    # Se LitrosValidos for 0 (nenhum km válido para a placa), MediaKmL fica 0.
     resultado['MediaKmL'] = (
         resultado['TotalKm'] / resultado['LitrosValidos'].replace(0.0, float('nan'))
     ).fillna(0.0)
 
-    # Status vs meta: True = atingiu, False = abaixo, None = sem meta
     resultado['AtiugiuMeta'] = resultado.apply(
         lambda r: (r['MediaKmL'] >= r['MetaNum']) if pd.notna(r['MetaNum']) else None,
         axis=1
@@ -144,23 +293,25 @@ def agregar_por_placa(df: pd.DataFrame) -> pd.DataFrame:
     return resultado
 
 
-# ─── ANÁLISE POR POSTO ────────────────────────────────────────────────────────
+# ─── CUSTO POR POSTO (COMBUSTÍVEL) ───────────────────────────────────────────
 
 def calcular_custo_por_posto(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcula o preço médio PONDERADO por litro em cada posto.
-
-    Por que ponderado e não média simples de Vlr.litro?
-    Porque o volume comprado varia: 200L a R$6,93 pesa mais do que 50L.
-    Preço ponderado = total gasto ÷ total de litros comprados no posto.
+    Preço médio PONDERADO por litro em cada posto — apenas combustível.
+    ARLA e PEDÁGIO são excluídos (têm preços incomparáveis com diesel/gasolina).
     """
-    agg = df.groupby('Posto').agg(
+    df_comb = df[df['TipoProduto'] == 'COMBUSTIVEL']
+
+    if df_comb.empty:
+        return pd.DataFrame(columns=['Posto', 'TotalValor', 'TotalLitros',
+                                     'QtdAbastecimentos', 'PrecoMedio'])
+
+    agg = df_comb.groupby('Posto').agg(
         TotalValor=('Valor.total', 'sum'),
         TotalLitros=('Qtde', 'sum'),
         QtdAbastecimentos=('Nº', 'count'),
     ).reset_index()
 
-    # Divisão segura (evita ZeroDivisionError se um posto tiver Qtde = 0)
     agg['PrecoMedio'] = (
         agg['TotalValor'] / agg['TotalLitros'].replace(0.0, float('nan'))
     ).fillna(0.0)
@@ -172,16 +323,13 @@ def calcular_custo_por_posto(df: pd.DataFrame) -> pd.DataFrame:
 
 def ranking_top3(df_placas: pd.DataFrame) -> Dict[str, List[Dict]]:
     """
-    Retorna o Top 3 de eficiência (km/L) para cada categoria de meta.
-
-    Retorna dicionário: {'Leve': [...], 'Média': [...], 'Pesada Leve': [...], 'Pesada': [...]}
-    Cada lista contém dicts com: posicao, placa, media_kml, meta, tipo.
+    Top 3 de eficiência (km/L) para cada categoria de meta.
+    Retorna dict: {'Leve': [...], 'Média': [...], 'Pesada Leve': [...], 'Pesada': [...]}
     """
     categorias = ['Leve', 'Média', 'Pesada Leve', 'Pesada']
     resultado = {}
 
     for categoria in categorias:
-        # Filtra pela categoria e descarta placas sem dados de km
         df_cat = df_placas[
             (df_placas['Categoria'] == categoria) &
             (df_placas['MediaKmL'] > 0)

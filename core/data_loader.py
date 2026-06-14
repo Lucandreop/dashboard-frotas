@@ -1,6 +1,6 @@
 """
 Módulo responsável por carregar e validar a planilha de abastecimentos.
-Separa a lógica de leitura de arquivo do restante do dashboard.
+Suporta dois formatos: planilha mensal (um mês) e planilha geral (ano inteiro empilhado).
 """
 
 import math
@@ -8,96 +8,153 @@ import pandas as pd
 import streamlit as st
 from typing import Optional
 
-# Todas as colunas que o dashboard espera encontrar na planilha
-COLUNAS_OBRIGATORIAS = [
-    'Nº', 'Data Abast', 'Placa', 'Tipo/Modelo', 'Posto',
-    'Condutor', 'Produto', 'Vlr. litro', 'Qtde', 'Valor.total',
-    'Km/Hs anterior', 'Km/Hs abast', 'Km Perc.', 'Média', 'MetaMédia'
-]
+# Meses em português — usado para criar a coluna mes_nome
+MESES_PT = {
+    1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril',
+    5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto',
+    9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
+}
+
+# Colunas mínimas sem as quais o dashboard não consegue funcionar
+COLUNAS_MINIMAS = ['Data Abast', 'Placa', 'Produto', 'Qtde', 'Valor.total',
+                   'Km/Hs anterior', 'Km/Hs abast', 'Km Perc.', 'MetaMédia']
 
 
-# @st.cache_data: guarda o resultado na memória do Streamlit.
-# Quando o usuário interage com filtros, a planilha NÃO é relida do disco —
-# o Streamlit retorna a versão em cache. Isso torna o dashboard muito mais rápido.
-#
-# IMPORTANTE: st.error() NÃO deve ser chamado dentro de funções cacheadas.
-# O cache armazena apenas o valor de retorno; efeitos colaterais (como mostrar
-# mensagens na tela) não são repetidos em cache hits. Por isso, erros são
-# sinalizados via ValueError — o app.py captura e exibe a mensagem ao usuário.
 @st.cache_data
 def carregar_planilha(arquivo) -> pd.DataFrame:
     """
-    Lê a planilha Excel, valida colunas e aplica tratamentos.
+    Lê a planilha Excel e retorna um DataFrame pronto para uso.
 
-    Retorna um DataFrame pronto para uso.
-    Lança ValueError com mensagem amigável se houver problema de formato.
+    Aceita dois formatos:
+    - Formato antigo (v1): tem Nº, Tipo/Modelo, Condutor, Posto
+    - Formato novo (v2): tem Coluna1 (tipo), Posto ou Histórico/estabelecimento,
+      sem Nº e sem Condutor
+
+    Lança ValueError com mensagem amigável se o arquivo for inválido.
     """
     try:
-        # Tenta ler a aba 'Planilha1'; se não existir, lê a primeira aba
+        # Tenta ler aba 'Planilha1'; se não existir, lê a primeira aba
         try:
             df = pd.read_excel(arquivo, sheet_name='Planilha1', engine='openpyxl')
         except Exception:
             df = pd.read_excel(arquivo, sheet_name=0, engine='openpyxl')
 
-        # Remove linhas completamente em branco (comum em planilhas Excel reais)
+        # Remove linhas completamente em branco
         df = df.dropna(how='all').reset_index(drop=True)
 
-        # Verifica se todas as colunas obrigatórias existem
-        colunas_faltando = [c for c in COLUNAS_OBRIGATORIAS if c not in df.columns]
-        if colunas_faltando:
+        # Garante que nomes de colunas não têm espaços extras
+        df.columns = [c.strip() for c in df.columns]
+
+        # --- Normalização de nomes de colunas ---
+
+        # Estabelecimento: aceita 'Histórico/estabelecimento' ou 'Posto'
+        if 'Histórico/estabelecimento' in df.columns and 'Posto' not in df.columns:
+            df = df.rename(columns={'Histórico/estabelecimento': 'Posto'})
+
+        # Tipo de veículo: aceita 'Coluna1' (formato novo) ou 'Tipo/Modelo' (formato antigo)
+        if 'Coluna1' in df.columns and 'Tipo/Modelo' not in df.columns:
+            df = df.rename(columns={'Coluna1': 'Tipo/Modelo'})
+
+        # Verifica colunas mínimas obrigatórias
+        faltando = [c for c in COLUNAS_MINIMAS if c not in df.columns]
+        if faltando:
             raise ValueError(
-                f"Planilha inválida! Colunas faltando: **{', '.join(colunas_faltando)}**\n\n"
-                "Verifique se o arquivo correto foi enviado e se os nomes das colunas estão certos."
+                f"Planilha inválida! Colunas faltando: **{', '.join(faltando)}**\n\n"
+                "Verifique se o arquivo correto foi enviado."
             )
 
-        # --- Tratamento de dados sujos ---
+        # Colunas opcionais: cria vazias se não existirem
+        if 'Condutor' not in df.columns:
+            df['Condutor'] = ''
+        # 'Nº' pode ser lido como 'N°' ou sem o símbolo dependendo da planilha
+        col_n = next((c for c in df.columns if c.startswith('N') and len(c) <= 2), None)
+        if col_n and col_n != 'Nº':
+            df = df.rename(columns={col_n: 'Nº'})
+        if 'Nº' not in df.columns:
+            df['Nº'] = range(1, len(df) + 1)
+        if 'Tipo/Modelo' not in df.columns:
+            df['Tipo/Modelo'] = 'Não Cadastrado'
 
-        # Placas frequentemente chegam com espaços extras: "RWV8B89 " → "RWV8B89"
+        # --- Limpeza de dados ---
+
+        # Placas com espaços extras: "RWV8B89 " → "RWV8B89"
         df['Placa'] = df['Placa'].astype(str).str.strip()
 
-        # Condutor também pode ter espaços extras
+        # Condutor e Tipo/Modelo também podem ter espaços
         df['Condutor'] = df['Condutor'].astype(str).str.strip()
+        df['Tipo/Modelo'] = df['Tipo/Modelo'].astype(str).str.strip()
 
-        # Garante que a data está em formato datetime (facilita filtros e exibição)
+        # Data em formato datetime
         df['Data Abast'] = pd.to_datetime(df['Data Abast'], errors='coerce')
 
-        # MetaMédia é mista: números (5.5, 8.0) e texto ("Sem meta Def")
-        # pd.to_numeric com errors='coerce' converte textos para NaN automaticamente
+        # MetaMédia: mistura números e texto ("Sem meta Def") → converte para float
         df['MetaNum'] = pd.to_numeric(df['MetaMédia'], errors='coerce')
 
-        # Garante que colunas numéricas são mesmo numéricas
-        for col in ['Qtde', 'Valor.total', 'Km/Hs anterior', 'Km/Hs abast', 'Km Perc.', 'Média', 'Vlr. litro']:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        # Colunas numéricas que podem chegar como texto (ex: "40.195,73")
+        for col in ['Qtde', 'Valor.total', 'Km/Hs anterior', 'Km/Hs abast',
+                    'Km Perc.', 'Média', 'Vlr. litro']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-        # --- Flag de km válido (regra de negócio crítica da TNORTE) ---
-        # Apenas linhas com km_valido=True entram no cálculo de eficiência (km/L).
-        # Linhas inválidas ainda contam para volume (L) e valor (R$).
+        # --- Classificação por tipo de produto (ponto central da v2) ---
+        df['TipoProduto'] = df['Produto'].apply(classificar_produto)
+
+        # --- Colunas de período (derivadas da data) ---
+        df['ano'] = df['Data Abast'].dt.year
+        df['mes'] = df['Data Abast'].dt.month
+        df['mes_nome'] = df['mes'].map(MESES_PT)
+
+        # --- Flag de km válido (só faz sentido para COMBUSTIVEL) ---
+        # Linhas de ARLA e PEDAGIO sempre ficam com km_valido=False
         df['km_valido'] = (
-            (df['Km/Hs anterior'] > 0) &    # não é o primeiro lançamento da placa
-            (df['Km/Hs abast'] != 999999) &  # placa tem hodômetro funcionando
-            (df['Km Perc.'] > 0) &           # rodou alguma distância
-            (df['Km Perc.'] <= 3000)         # não é erro de digitação (nenhum caminhão roda 3000km entre abastecimentos)
+            (df['TipoProduto'] == 'COMBUSTIVEL') &
+            (df['Km/Hs anterior'] > 0) &
+            (df['Km/Hs abast'] != 999999) &
+            (df['Km Perc.'] > 0) &
+            (df['Km Perc.'] <= 3000)
         )
 
-        # Classifica cada linha na categoria de eficiência da TNORTE
+        # --- Categoria por meta (baseada em MetaNum) ---
         df['Categoria'] = df['MetaNum'].apply(classificar_categoria)
+
+        # Aviso se houver placas sem tipo definido
+        sem_tipo = df[df['Tipo/Modelo'].isin(['Não Cadastrado', 'nan', ''])]['Placa'].unique()
+        if len(sem_tipo) > 0:
+            st.warning(
+                f"⚠️ {len(sem_tipo)} placa(s) sem Tipo de Veículo definido: "
+                f"{', '.join(sem_tipo[:10])}{'...' if len(sem_tipo) > 10 else ''}. "
+                "Preencha o arquivo `data/cadastro_veiculos.csv` para corrigir."
+            )
 
         return df
 
     except ValueError:
-        raise  # repassa erros de validação — app.py vai capturar e exibir
+        raise
     except Exception as e:
         raise ValueError(f"Erro ao ler o arquivo: {str(e)}")
 
 
+def classificar_produto(produto: str) -> str:
+    """
+    Classifica o lançamento em COMBUSTIVEL, ARLA ou PEDAGIO.
+
+    PEDAGIO: 'VALE PEDAGIO' — Qtde=1, Vlr.litro = valor da passagem, Km=0
+    ARLA: 'ARLA 32' — litros e R$, mas não move o veículo (sem km/L)
+    COMBUSTIVEL: todo o resto (DIESEL S10, GASOLINA COMUM, ETANOL, etc.)
+    """
+    p = str(produto).upper()
+    if 'PEDAGIO' in p or 'PEDÁGIO' in p:
+        return 'PEDAGIO'
+    if 'ARLA' in p:
+        return 'ARLA'
+    return 'COMBUSTIVEL'
+
+
 def classificar_categoria(meta: float) -> str:
     """
-    Converte o valor numérico da meta em um nome de categoria.
-
-    As categorias são definidas pela TNORTE conforme o tipo de veículo.
-    Placas com meta NaN (texto "Sem meta Def") ficam em 'Sem Meta'.
+    Converte o valor numérico da meta em nome de categoria TNORTE.
+    Placas sem meta numérica ficam em 'Sem Meta'.
     """
-    # Verifica se é NaN (math.isnan está importado no topo do arquivo)
     if meta is None:
         return 'Sem Meta'
     try:
@@ -121,8 +178,8 @@ def classificar_categoria(meta: float) -> str:
 
 def detectar_periodo(df: pd.DataFrame) -> str:
     """
-    Identifica o mês/ano do lote de dados pela coluna de data.
-    Retorna string formatada como 'Abril/2026'.
+    Identifica o período do dataset.
+    Retorna 'Abril/2026' para planilha mensal ou '2026' para planilha anual.
     """
     if df is None or df.empty:
         return 'Desconhecido'
@@ -131,16 +188,31 @@ def detectar_periodo(df: pd.DataFrame) -> str:
     if datas_validas.empty:
         return 'Desconhecido'
 
-    # Pega o MÊS mais frequente (não a data individual).
-    # dt.to_period('M') converte "2026-04-03" → "2026-04" para poder comparar só o mês.
-    # Exemplo: se há datas em março e abril, pega o mês que aparece mais vezes.
+    meses_unicos = datas_validas.dt.to_period('M').nunique()
+
+    if meses_unicos > 1:
+        # Planilha com múltiplos meses: retorna só o ano
+        ano = datas_validas.dt.year.mode().iloc[0]
+        return str(ano)
+
+    # Planilha de um único mês
     data_ref = datas_validas.dt.to_period('M').mode().iloc[0].to_timestamp()
-
-    meses_pt = {
-        1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril',
-        5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto',
-        9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
-    }
-
-    mes_nome = meses_pt.get(data_ref.month, str(data_ref.month))
+    mes_nome = MESES_PT.get(data_ref.month, str(data_ref.month))
     return f"{mes_nome}/{data_ref.year}"
+
+
+def listar_meses_disponiveis(df: pd.DataFrame) -> list[str]:
+    """
+    Retorna lista ordenada dos meses presentes no DataFrame.
+    Exemplo: ['Janeiro', 'Fevereiro', 'Março']
+    """
+    if df is None or df.empty:
+        return []
+
+    meses_presentes = (
+        df[['mes', 'mes_nome']]
+        .drop_duplicates()
+        .dropna()
+        .sort_values('mes')
+    )
+    return meses_presentes['mes_nome'].tolist()

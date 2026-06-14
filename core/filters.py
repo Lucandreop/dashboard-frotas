@@ -13,17 +13,16 @@ def aplicar_filtros(
     tipos: List[str],
     postos: List[str],
     placas: List[str],
-    condutores: List[str],
+    mes_nome: str = '',
 ) -> pd.DataFrame:
     """
     Filtra o DataFrame conforme as seleções da sidebar.
 
-    Listas vazias significam "sem filtro para esse campo" (mostra tudo).
-    Cada filtro preenchido reduz o conjunto de dados (operação AND).
+    Listas vazias ou string vazia significam 'sem filtro para esse campo'.
+    O filtro de mês aceita 'Ano inteiro' como valor especial (não filtra).
     """
     df_filtrado = df.copy()
 
-    # Cada bloco 'if' só filtra se o usuário realmente selecionou algo
     if categorias:
         df_filtrado = df_filtrado[df_filtrado['Categoria'].isin(categorias)]
 
@@ -36,7 +35,8 @@ def aplicar_filtros(
     if placas:
         df_filtrado = df_filtrado[df_filtrado['Placa'].isin(placas)]
 
-    if condutores:
-        df_filtrado = df_filtrado[df_filtrado['Condutor'].isin(condutores)]
+    # Filtro de mês: 'Ano inteiro' ou vazio = sem filtro
+    if mes_nome and mes_nome != 'Ano inteiro':
+        df_filtrado = df_filtrado[df_filtrado['mes_nome'] == mes_nome]
 
     return df_filtrado
