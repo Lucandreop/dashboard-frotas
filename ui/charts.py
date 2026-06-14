@@ -311,8 +311,10 @@ def grafico_consolidado_custos(df_cons: pd.DataFrame) -> go.Figure:
         hovertemplate='<b>%{x}</b><br>Pedágio: R$ %{y:,.2f}<extra></extra>',
     ))
 
+    layout = dict(_LAYOUT_BASE)
+    layout['margin'] = dict(l=10, r=10, t=60, b=10)
     fig.update_layout(
-        **_LAYOUT_BASE,
+        **layout,
         title=dict(text="💰 Custo por Mês — 3 Contas Separadas",
                    font=dict(size=13, color=COR_AZUL_PRIMARIO)),
         barmode='group',
@@ -320,7 +322,6 @@ def grafico_consolidado_custos(df_cons: pd.DataFrame) -> go.Figure:
         yaxis=dict(showgrid=True, gridcolor='#EEEEEE', showticklabels=False),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         height=350,
-        margin=dict(l=10, r=10, t=60, b=10),
     )
     return fig
 
